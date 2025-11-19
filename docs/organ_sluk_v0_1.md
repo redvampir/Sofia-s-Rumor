@@ -32,12 +32,15 @@
 
 ### Общие поля
 - `bpm` (number, ≥0): оценка темпа (beats per minute). Для речи может быть `null`.
+- `bpm_confidence` (number, 0–1): уверенность детектора темпа; при `mode="speech"` может быть низкой или `null`.
 - `time_signature` (string): размер, формат "4/4", "3/4", "6/8"; если не обнаружен — `null` (может быть опущен в ответе).
 - `key` (string): тональность, формат `"Am"`, `"C#maj"`, `"Fmin"`; `null`, если не определена.
+- `key_confidence` (number, 0–1): уверенность в определении тональности; при шуме/речи может быть низкой или `null`.
 - `energy` (number, 0–1): субъективная напряжённость/динамика трека.
 - `brightness` (number, 0–1): относительная «яркость» (доля ВЧ/сибилянтов).
 - `mood_tags` (string[]): список тегов настроения, 0–8 элементов, например `["melancholic", "dreamy"]`.
 - `duration_sec` (number, >0): длительность аудио в секундах.
+- `analysis_status` (string): итоговое состояние анализа: `"ok"` (полноценный), `"degraded"` (частично эвристический/неполный результат), `"failed"` (анализ не выполнен, поля могут быть `null`).
 
 ### Структура трека
 - `sections` (array): список структурированных частей; пустой массив, если не запрошено или не обнаружено.
@@ -46,6 +49,7 @@
   - `end_sec` (number, >start_sec): конец секции.
   - `energy` (number, 0–1, optional): локальная оценка энергии секции.
   - `mood_tags` (string[], optional): настроение секции.
+  - `section_confidence` (number, 0–1, optional): уверенность в сегментации; если сегментация слабая, поле может отсутствовать или быть низким.
 
 ### Речь/подкасты (опциональные поля)
 - `speech_ratio` (number, 0–1): доля времени с речью.
@@ -58,16 +62,19 @@
 ```json
 {
   "bpm": 122.4,
+  "bpm_confidence": 0.82,
   "time_signature": "4/4",
   "key": "Am",
+  "key_confidence": 0.77,
   "energy": 0.73,
   "brightness": 0.58,
   "mood_tags": ["dreamy", "melancholic"],
   "duration_sec": 214.2,
+  "analysis_status": "ok",
   "sections": [
-    {"type": "intro", "start_sec": 0.0, "end_sec": 12.5, "energy": 0.35},
-    {"type": "verse", "start_sec": 12.5, "end_sec": 52.0, "energy": 0.55},
-    {"type": "chorus", "start_sec": 52.0, "end_sec": 82.0, "energy": 0.78, "mood_tags": ["uplifting"]}
+    {"type": "intro", "start_sec": 0.0, "end_sec": 12.5, "energy": 0.35, "section_confidence": 0.7},
+    {"type": "verse", "start_sec": 12.5, "end_sec": 52.0, "energy": 0.55, "section_confidence": 0.8},
+    {"type": "chorus", "start_sec": 52.0, "end_sec": 82.0, "energy": 0.78, "mood_tags": ["uplifting"], "section_confidence": 0.72}
   ],
   "speech_ratio": null,
   "silence_segments": [],
@@ -107,18 +114,21 @@ Content-Disposition: form-data; name="mode"
 ```json
 {
   "bpm": 128.0,
+  "bpm_confidence": 0.76,
   "time_signature": "4/4",
   "key": "C#maj",
+  "key_confidence": 0.71,
   "energy": 0.81,
   "brightness": 0.66,
   "mood_tags": ["energetic", "bright"],
   "duration_sec": 189.6,
+  "analysis_status": "ok",
   "sections": [
-    {"type": "intro", "start_sec": 0, "end_sec": 10.5},
-    {"type": "verse", "start_sec": 10.5, "end_sec": 42.0},
-    {"type": "chorus", "start_sec": 42.0, "end_sec": 72.0},
-    {"type": "bridge", "start_sec": 120.0, "end_sec": 138.0},
-    {"type": "outro", "start_sec": 168.0, "end_sec": 189.6}
+    {"type": "intro", "start_sec": 0, "end_sec": 10.5, "section_confidence": 0.65},
+    {"type": "verse", "start_sec": 10.5, "end_sec": 42.0, "section_confidence": 0.78},
+    {"type": "chorus", "start_sec": 42.0, "end_sec": 72.0, "section_confidence": 0.75},
+    {"type": "bridge", "start_sec": 120.0, "end_sec": 138.0, "section_confidence": 0.6},
+    {"type": "outro", "start_sec": 168.0, "end_sec": 189.6, "section_confidence": 0.62}
   ],
   "speech_ratio": null,
   "silence_segments": [],
@@ -173,11 +183,12 @@ Content-Disposition: form-data; name="mode"
   - не выдумывать параметры трека при отсутствии данных; в ответах явно говорить об ошибке анализа.
 
 ## 6. Ограничения и допущения (Limitations)
-- Оценки энергии и настроения вероятностные, зависят от обучающих данных — не считать их абсолютной истиной.
+- Оценки энергии и настроения вероятностные, зависят от обучающих данных — не считать их абсолютной истиной. Поля `*_confidence` сигнализируют, когда детектор не уверен: при значениях <0.5 данные считаются эвристическими.
 - Поддерживаемые форматы v0.1: стерео/моно, 16-bit PCM или сжатые (mp3/aac/ogg), длительность ≤ 15 минут, частота дискретизации 44.1/48 кГц.
-- Шумный микс речи и музыки: режим `auto` пытается разделить, но точность ниже; в JSON возможны `null` для тональности/BPM и низкая уверенность mood.
-- При отсутствии явной ритмики (эмбиент, подкасты) BPM может быть неопределён (`null`).
-- Размер (time signature) — эвристический, для сложных полиритмов точность ограничена.
+- Шумный микс речи и музыки: режим `auto` пытается разделить, но точность ниже; в JSON возможны `null` для тональности/BPM и низкая уверенность mood. В таких случаях выставляем `analysis_status="degraded"` и удерживаем поля с низкими `*_confidence`.
+- При отсутствии явной ритмики (эмбиент, подкасты) BPM может быть неопределён (`null`); агенту следует трактовать `analysis_status="degraded"` как сигнал не выдумывать ритм.
+- Размер (time signature) — эвристический, для сложных полиритмов точность ограничена; при сомнениях поле может отсутствовать, а статус быть `degraded`.
+- Если анализ полностью провалился (битый файл, неподдерживаемый формат) — `analysis_status="failed"`, все метрики `null`, агент обязан сообщить об ошибке вместо выдумывания значений.
 
 **Возможные улучшения для v0.2+:**
 - Поддержка многоканальных треков и битовых глубин выше 16-bit.
@@ -192,16 +203,19 @@ Content-Disposition: form-data; name="mode"
    ```json
    {
      "bpm": 109.5,
+     "bpm_confidence": 0.74,
      "time_signature": "4/4",
      "key": "Gmaj",
+     "key_confidence": 0.69,
      "energy": 0.52,
      "brightness": 0.41,
      "mood_tags": ["melancholic", "dreamy"],
      "duration_sec": 202.0,
+     "analysis_status": "ok",
      "sections": [
-       {"type": "intro", "start_sec": 0, "end_sec": 8},
-       {"type": "verse", "start_sec": 8, "end_sec": 48},
-       {"type": "chorus", "start_sec": 48, "end_sec": 78}
+       {"type": "intro", "start_sec": 0, "end_sec": 8, "section_confidence": 0.68},
+       {"type": "verse", "start_sec": 8, "end_sec": 48, "section_confidence": 0.73},
+       {"type": "chorus", "start_sec": 48, "end_sec": 78, "section_confidence": 0.7}
      ],
      "speech_ratio": null,
      "silence_segments": [],
@@ -216,18 +230,21 @@ Content-Disposition: form-data; name="mode"
    ```json
    {
      "bpm": 132.0,
+     "bpm_confidence": 0.79,
      "time_signature": "4/4",
      "key": "Dm",
+     "key_confidence": 0.75,
      "energy": 0.82,
      "brightness": 0.74,
      "mood_tags": ["energetic", "tense"],
      "duration_sec": 180.0,
+     "analysis_status": "ok",
      "sections": [
-       {"type": "intro", "start_sec": 0, "end_sec": 12},
-       {"type": "verse", "start_sec": 12, "end_sec": 45},
-       {"type": "chorus", "start_sec": 45, "end_sec": 75},
-       {"type": "drop", "start_sec": 90, "end_sec": 110},
-       {"type": "outro", "start_sec": 150, "end_sec": 180}
+       {"type": "intro", "start_sec": 0, "end_sec": 12, "section_confidence": 0.64},
+       {"type": "verse", "start_sec": 12, "end_sec": 45, "section_confidence": 0.81},
+       {"type": "chorus", "start_sec": 45, "end_sec": 75, "section_confidence": 0.77},
+       {"type": "drop", "start_sec": 90, "end_sec": 110, "section_confidence": 0.69},
+       {"type": "outro", "start_sec": 150, "end_sec": 180, "section_confidence": 0.62}
      ],
      "speech_ratio": null,
      "silence_segments": [],
@@ -242,12 +259,15 @@ Content-Disposition: form-data; name="mode"
    ```json
    {
      "bpm": null,
+     "bpm_confidence": null,
      "time_signature": null,
      "key": null,
+     "key_confidence": null,
      "energy": 0.38,
      "brightness": 0.36,
      "mood_tags": ["informative"],
      "duration_sec": 2700.0,
+     "analysis_status": "degraded",
      "sections": [],
      "speech_ratio": 0.92,
      "silence_segments": [
